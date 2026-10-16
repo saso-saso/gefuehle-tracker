@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gefühle-Tracker</title>
+<style>
+  :root { --bg:#fafaf8; --fg:#1b2333; --muted:#6b7385; --card:#fff; --line:#e3e5ea; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161922; --fg:#eceef3; --muted:#9aa1b2; --card:#1f2330; --line:#323848; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px 48px; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; }
+  main { max-width:760px; margin:0 auto; }
+  h1 { margin:0 0 4px; font-size:1.6rem; }
+  p.hint { margin:0 0 16px; color:var(--muted); }
+  svg { width:100%; height:auto; display:block; }
+  .w { cursor:pointer; stroke:#fff; stroke-width:1.5; transition:filter .12s; }
+  .w:hover, .w:focus { filter:brightness(.92) saturate(1.2); outline:none; }
+  svg text { fill:#1b2333; pointer-events:none; text-anchor:middle; dominant-baseline:central; font-family:system-ui, sans-serif; }
+  dialog { border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--fg); padding:20px; width:min(420px, 92vw); }
+  dialog::backdrop { background:rgba(0,0,0,.45); }
+  dialog label { display:block; font-weight:600; margin-bottom:8px; }
+  textarea { width:100%; min-height:110px; padding:8px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); font:inherit; resize:vertical; }
+  .btns { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+  button { font:inherit; padding:7px 16px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+  button.ok { background:#3d6fd1; border-color:#3d6fd1; color:#fff; }
+  .head { display:flex; justify-content:space-between; align-items:center; margin:28px 0 8px; }
+  .head h2 { margin:0; font-size:1.2rem; }
+  ul { list-style:none; margin:0; padding:0; }
+  li { background:var(--card); border:1px solid var(--line); border-left-width:6px; border-radius:8px; padding:8px 12px; margin-bottom:8px; }
+  li small { color:var(--muted); display:block; }
+  li .t { white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Gefühle-Tracker</h1>
+  <p class="hint">Klicke auf ein Gefühl im Rad, um einen Eintrag zu erfassen.</p>
+  <svg id="wheel" viewBox="0 0 720 720" role="group" aria-label="Gefühlsrad"></svg>
+
+  <div class="head"><h2>Einträge</h2><button id="export">Als JSON exportieren</button></div>
+  <ul id="list"></ul>
+</main>
+
+<dialog id="dlg">
+  <form method="dialog">
+    <label for="txt">nähere Beschreibung des Gefühls: <span id="sel" style="font-weight:400;color:var(--muted)"></span></label>
+    <textarea id="txt"></textarea>
+    <div class="btns">
+      <button value="cancel">Cancel</button>
+      <button value="ok" class="ok">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+// Kategorie, Farbe, mittlerer Ring, äußerer Ring – im Uhrzeigersinn ab 12 Uhr
+const DATA = [
+  ["Froh","#F5C242",["zufrieden","erfreut","wohl","belustigt","hoffnungsvoll","neugierig"],["freudig","beschwingt","entzückt","begeistert","dankbar","gerührt"]],
+  ["Traurig","#6B93D8",["wehmütig","gedrückt","enttäuscht","entmutigt","müde","flach"],["trauernd","gebrochen","verzweifelt","hoffnungslos","leer","gequält"]],
+  ["Wütend","#E06B5A",["genervt","gereizt","ungeduldig","frustriert","verstimmt","empört"],["rasend","wutentbrannt","verraten","kochend","verächtlich","verbittert"]],
+  ["Ängstlich","#9B7FDC",["unbehaglich","nervös","bang","vorsichtig","verunsichert","angespannt"],["angstvoll","panisch","verängstigt","Grauen","überfordert","hilflos"]],
+  ["Überrascht","#4DB3C4",["aufgeschreckt","verwirrt","fasziniert","irritiert"],["schockiert","fassungslos","verblüfft","sprachlos","desorientiert"]],
+  ["Angewidert","#7EAF5E",["unwohl","widerstrebend","abgeschreckt","abweisend","misstrauisch"],["angeekelt","entsetzt","abgestoßen","beschämt","selbstverachtend"]],
+  ["Ruhig","#66C2A0",["gesetzt","stabil","entspannt","gelassen","unbehelligt","ausgeruht"],["friedlich","heiter","geerdet","sicher","frei","ganz"]],
+  ["Stark","#E08A4C",["fähig","konzentriert","entschlossen","bereit","engagiert","vorbereitet"],["selbstsicher","kraftvoll","stolz","energiegeladen","mutig","unaufhaltsam"]]
+];
+const C = 360, R = [55, 140, 235, 355], NS = "http://www.w3.org/2000/svg";
+const pt = (r, a) => [C + r * Math.sin(a * Math.PI / 180), C - r * Math.cos(a * Math.PI / 180)];
+const el = (n, attrs) => { const e = document.createElementNS(NS, n); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+
+function wedge(svg, r1, r2, a1, a2, fill, label, kat, size, bold) {
+  const [x1, y1] = pt(r2, a1), [x2, y2] = pt(r2, a2), [x3, y3] = pt(r1, a2), [x4, y4] = pt(r1, a1);
+  const g = el("g", { tabindex: 0, role: "button", "aria-label": label });
+  g.appendChild(el("path", { class: "w", style: "fill:" + fill,
+    d: `M${x1} ${y1}A${r2} ${r2} 0 0 1 ${x2} ${y2}L${x3} ${y3}A${r1} ${r1} 0 0 0 ${x4} ${y4}Z` }));
+  const a = (a1 + a2) / 2, [tx, ty] = pt((r1 + r2) / 2, a);
+  const t = el("text", { transform: `translate(${tx} ${ty}) rotate(${a < 180 ? a - 90 : a + 90})`,
+    "font-size": size, "font-weight": bold ? 700 : 400 });
+  t.textContent = label;
+  g.appendChild(t);
+  const pick = () => openDialog(label, kat);
+  g.addEventListener("click", pick);
+  g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+  svg.appendChild(g);
+}
+
+const svg = document.getElementById("wheel");
+DATA.forEach(([kat, col, mid, out], i) => {
+  const a0 = i * 45;
+  wedge(svg, R[0], R[1], a0, a0 + 45, col, kat, kat, 14, true);
+  [[mid, 1, 12], [out, 2, 14]].forEach(([items, ring, size]) => {
+    const step = 45 / items.length;
+    const fill = `color-mix(in srgb, ${col} ${ring === 1 ? 35 : 60}%, white)`;
+    items.forEach((name, j) => wedge(svg, R[ring], R[ring + 1], a0 + j * step, a0 + (j + 1) * step, fill, name, kat, size, false));
+  });
+});
+
+// Dialog
+const dlg = document.getElementById("dlg"), txt = document.getElementById("txt");
+let current = null;
+function openDialog(gefuehl, kategorie) {
+  current = { gefuehl, kategorie };
+  document.getElementById("sel").textContent = "(" + gefuehl + ")";
+  txt.value = "";
+  dlg.showModal();
+  txt.focus();
+}
+dlg.addEventListener("close", () => {
+  if (dlg.returnValue === "ok" && current) {
+    const entries = load();
+    entries.push({ zeitpunkt: new Date().toISOString(), gefuehl: current.gefuehl, kategorie: current.kategorie, text: txt.value.trim() });
+    save(entries);
+    render();
+  }
+  dlg.returnValue = "";
+  current = null;
+});
+
+// Speicherung (localStorage im Browser)
+const KEY = "gefuehle-eintraege";
+function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } }
+function save(list) { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { alert("Speichern im Browser nicht möglich – bitte JSON exportieren."); } }
+
+function render() {
+  const ul = document.getElementById("list");
+  ul.replaceChildren();
+  const colors = Object.fromEntries(DATA.map(d => [d[0], d[1]]));
+  const list = load().slice().reverse();
+  if (!list.length) { const li = document.createElement("li"); li.textContent = "Noch keine Einträge."; ul.appendChild(li); return; }
+  list.forEach(e => {
+    const li = document.createElement("li");
+    li.style.borderLeftColor = colors[e.kategorie] || "#999";
+    const s = document.createElement("small");
+    s.textContent = new Date(e.zeitpunkt).toLocaleString("de-DE") + " · " + e.kategorie;
+    const b = document.createElement("strong"); b.textContent = e.gefuehl;
+    const t = document.createElement("div"); t.className = "t"; t.textContent = e.text;
+    li.append(s, b, t);
+    ul.appendChild(li);
+  });
+}
+
+document.getElementById("export").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(load(), null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "gefuehle.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+render();
+</script>
+</body>
+</html>

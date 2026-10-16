@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gefühle-Tracker</title>
+<style>
+  :root { --bg:#fafaf8; --fg:#1b2333; --muted:#6b7385; --card:#fff; --line:#e3e5ea; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161922; --fg:#eceef3; --muted:#9aa1b2; --card:#1f2330; --line:#323848; } }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; padding:16px 12px calc(40px + env(safe-area-inset-bottom)); background:var(--bg); color:var(--fg); font:16px/1.4 system-ui, sans-serif; }
+  main { max-width:560px; margin:0 auto; }
+  h1 { margin:0 0 4px; font-size:1.4rem; }
+  p.hint { margin:0 0 14px; color:var(--muted); }
+  details { border-radius:12px; margin-bottom:10px; overflow:hidden; background:var(--card); border:1px solid var(--line); }
+  summary { list-style:none; cursor:pointer; padding:14px 16px; font-weight:700; font-size:1.05rem; color:#1b2333; display:flex; justify-content:space-between; align-items:center; min-height:52px; }
+  summary::-webkit-details-marker { display:none; }
+  summary::after { content:"▾"; transition:transform .15s; }
+  details[open] summary::after { transform:rotate(180deg); }
+  .body { padding:12px; }
+  .body h3 { margin:4px 0 8px; font-size:.8rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .chip { font:inherit; color:#1b2333; border:0; border-radius:999px; padding:10px 16px; min-height:44px; cursor:pointer; }
+  .chip:active { filter:brightness(.9); }
+  dialog { border:1px solid var(--line); border-radius:16px; background:var(--card); color:var(--fg); padding:18px; width:min(440px, 94vw); margin:auto auto 12px; }
+  dialog::backdrop { background:rgba(0,0,0,.45); }
+  dialog label { display:block; font-weight:600; margin-bottom:8px; }
+  textarea { width:100%; min-height:120px; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--fg); font:inherit; font-size:16px; resize:vertical; }
+  .btns { display:flex; gap:8px; margin-top:12px; }
+  .btns button { flex:1; }
+  button.b { font:inherit; padding:12px 16px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+  button.ok { background:#3d6fd1; border-color:#3d6fd1; color:#fff; }
+  .head { display:flex; justify-content:space-between; align-items:center; margin:26px 0 8px; gap:8px; }
+  .head h2 { margin:0; font-size:1.15rem; }
+  ul { list-style:none; margin:0; padding:0; }
+  li { background:var(--card); border:1px solid var(--line); border-left-width:6px; border-radius:10px; padding:10px 12px; margin-bottom:8px; }
+  li small { color:var(--muted); display:block; }
+  li .t { white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Gefühle-Tracker</h1>
+  <p class="hint">Kategorie antippen, dann das passende Gefühl wählen.</p>
+  <div id="cats"></div>
+
+  <div class="head"><h2>Einträge</h2><button class="b" id="export">JSON exportieren</button></div>
+  <ul id="list"></ul>
+</main>
+
+<dialog id="dlg">
+  <form method="dialog">
+    <label for="txt">nähere Beschreibung des Gefühls: <span id="sel" style="font-weight:400;color:var(--muted)"></span></label>
+    <textarea id="txt"></textarea>
+    <div class="btns">
+      <button class="b" value="cancel">Cancel</button>
+      <button class="b ok" value="ok">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const DATA = [
+  ["Froh","#F5C242",["zufrieden","erfreut","wohl","belustigt","hoffnungsvoll","neugierig"],["freudig","beschwingt","entzückt","begeistert","dankbar","gerührt"]],
+  ["Traurig","#6B93D8",["wehmütig","gedrückt","enttäuscht","entmutigt","müde","flach"],["trauernd","gebrochen","verzweifelt","hoffnungslos","leer","gequält"]],
+  ["Wütend","#E06B5A",["genervt","gereizt","ungeduldig","frustriert","verstimmt","empört"],["rasend","wutentbrannt","verraten","kochend","verächtlich","verbittert"]],
+  ["Ängstlich","#9B7FDC",["unbehaglich","nervös","bang","vorsichtig","verunsichert","angespannt"],["angstvoll","panisch","verängstigt","Grauen","überfordert","hilflos"]],
+  ["Überrascht","#4DB3C4",["aufgeschreckt","verwirrt","fasziniert","irritiert"],["schockiert","fassungslos","verblüfft","sprachlos","desorientiert"]],
+  ["Angewidert","#7EAF5E",["unwohl","widerstrebend","abgeschreckt","abweisend","misstrauisch"],["angeekelt","entsetzt","abgestoßen","beschämt","selbstverachtend"]],
+  ["Ruhig","#66C2A0",["gesetzt","stabil","entspannt","gelassen","unbehelligt","ausgeruht"],["friedlich","heiter","geerdet","sicher","frei","ganz"]],
+  ["Stark","#E08A4C",["fähig","konzentriert","entschlossen","bereit","engagiert","vorbereitet"],["selbstsicher","kraftvoll","stolz","energiegeladen","mutig","unaufhaltsam"]]
+];
+
+const mix = (c, p) => `color-mix(in srgb, ${c} ${p}%, white)`;
+function chip(name, kat, bg) {
+  const b = document.createElement("button");
+  b.className = "chip"; b.textContent = name; b.style.background = bg;
+  b.addEventListener("click", () => openDialog(name, kat));
+  return b;
+}
+function group(title, items, kat, bg) {
+  const frag = document.createDocumentFragment();
+  const h = document.createElement("h3"); h.textContent = title;
+  const d = document.createElement("div"); d.className = "chips";
+  items.forEach(n => d.appendChild(chip(n, kat, bg)));
+  frag.append(h, d);
+  return frag;
+}
+
+const cats = document.getElementById("cats");
+DATA.forEach(([kat, col, mid, out]) => {
+  const det = document.createElement("details");
+  const sum = document.createElement("summary");
+  sum.style.background = col; sum.textContent = kat;
+  const body = document.createElement("div"); body.className = "body";
+  body.append(group("Allgemein", [kat], kat, col), group("Mittel", mid, kat, mix(col, 35)), group("Fein", out, kat, mix(col, 60)));
+  det.append(sum, body);
+  // nur eine Kategorie gleichzeitig offen
+  det.addEventListener("toggle", () => { if (det.open) cats.querySelectorAll("details[open]").forEach(o => { if (o !== det) o.open = false; }); });
+  cats.appendChild(det);
+});
+
+const dlg = document.getElementById("dlg"), txt = document.getElementById("txt");
+let current = null;
+function openDialog(gefuehl, kategorie) {
+  current = { gefuehl, kategorie };
+  document.getElementById("sel").textContent = "(" + gefuehl + ")";
+  txt.value = "";
+  dlg.showModal();
+  txt.focus();
+}
+dlg.addEventListener("close", () => {
+  if (dlg.returnValue === "ok" && current) {
+    const list = load();
+    list.push({ zeitpunkt: new Date().toISOString(), gefuehl: current.gefuehl, kategorie: current.kategorie, text: txt.value.trim() });
+    save(list);
+    render();
+  }
+  dlg.returnValue = "";
+  current = null;
+});
+
+const KEY = "gefuehle-eintraege"; // gleicher Schlüssel wie die Kreis-Version
+function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } }
+function save(list) { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { alert("Speichern im Browser nicht möglich – bitte JSON exportieren."); } }
+
+function render() {
+  const ul = document.getElementById("list");
+  ul.replaceChildren();
+  const colors = Object.fromEntries(DATA.map(d => [d[0], d[1]]));
+  const list = load().slice().reverse();
+  if (!list.length) { const li = document.createElement("li"); li.textContent = "Noch keine Einträge."; ul.appendChild(li); return; }
+  list.forEach(e => {
+    const li = document.createElement("li");
+    li.style.borderLeftColor = colors[e.kategorie] || "#999";
+    const s = document.createElement("small");
+    s.textContent = new Date(e.zeitpunkt).toLocaleString("de-DE") + " · " + e.kategorie;
+    const b = document.createElement("strong"); b.textContent = e.gefuehl;
+    const t = document.createElement("div"); t.className = "t"; t.textContent = e.text;
+    li.append(s, b, t);
+    ul.appendChild(li);
+  });
+}
+
+document.getElementById("export").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(load(), null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "gefuehle.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+render();
+</script>
+</body>
+</html>
